@@ -45,6 +45,44 @@ class DriveLog:
                 lot = each.split(':')[1]
                 return lot.replace(' ', '')
 
+    # Get lot number
+    def identifyblanksocket(self):
+        rows = self.rows
+        dic={}
+        dic_NRDS = {}
+
+        for each in rows:
+
+            if each.startswith('Slot'):
+                blank_sockets = each.split(',')
+                blank_sockets = [''.join(list(filter(str.isdigit, i))) for i in blank_sockets if i]
+
+                if 'NRDS' in each and 'Marked bad' not in each:
+
+                    if blank_sockets[0] in dic_NRDS.keys():
+                        dic_NRDS[blank_sockets[0]] += blank_sockets[1:]
+                    else:
+                        dic_NRDS[blank_sockets[0]] = blank_sockets[1:]
+
+                elif 'Marked bad' in each:
+
+                    if blank_sockets[0] in dic.keys():
+                        dic[blank_sockets[0]] += blank_sockets[1:]
+                    else:
+                        dic[blank_sockets[0]] = blank_sockets[1:]
+
+        for each in dic:
+            dic[each] = list(set(dic[each]))
+
+        for each in dic_NRDS:
+            dic_NRDS[each] = list(set(dic_NRDS[each]))
+
+
+        self.dic_blank_sockets = dic
+        self.dic_NRDS = dic_NRDS
+        pass
+        pass
+
     def identifyBib(self):
         rows = self.rows
         lot = self.lot
@@ -87,16 +125,6 @@ class DriveLog:
         rows_data = rows_data[rows_data[key_location].isin(index_list)]
         self.df_rows = pandas.DataFrame(rows_data)
 
-        # tmp = [i.split(',') for i in self.rows_data]
-        # tmp = [i for i in tmp if i[self.dic_Bin2['Key_Word_Location']] in index_list]
-        #
-        # # slot id
-        # tmp = [i.append(5) for i in tmp]
-        # tmp = [i[6:] for i in tmp]
-        #
-        # for i in tmp:
-        #     i.remove('')
-
         return self.rows_data
 
     def readfile(self, file_path):
@@ -113,6 +141,7 @@ class DriveLog:
         self.df_bib = self.df_config[self.df_config['BIB_No'].apply(lambda row: row in self.bib_number)]
 
         self.identifyOven()
+        self.identifyblanksocket()
 
         df_Bin2 = self.df_bib[self.df_bib['Check_Type'] == 'Bin2']
         df_Qcheck = self.df_bib[self.df_bib['Check_Type'] == 'Qcheck']
@@ -120,24 +149,21 @@ class DriveLog:
         if len(df_Bin2):
             self.dic_Bin2 = df_Bin2.to_dict('records')[0]
 
-            socket_location = self.dic_Bin2['1st_Socket_Location']
-            socket_location = int(socket_location)
-            if socket_location > 0:
-                socket_location -= 1
-            self.dic_Bin2['1st_Socket_Location'] = socket_location
+            self.dic_Bin2['1st_Socket_Location'] = self.index_check(self.dic_Bin2['1st_Socket_Location'])
+            self.dic_Bin2['Key_Word_Location'] = self.index_check(self.dic_Bin2['Key_Word_Location'])
 
         if len(df_Qcheck):
             self.dic_Qcheck = df_Qcheck.to_dict('records')[0]
 
-            socket_location = self.dic_Qcheck['1st_Socket_Location']
-            socket_location = int(socket_location)
-            if socket_location > 0:
-                socket_location -= 1
-            self.dic_Qcheck['1st_Socket_Location'] = socket_location
+            self.dic_Qcheck['1st_Socket_Location'] = self.index_check(self.dic_Qcheck['1st_Socket_Location'])
+            self.dic_Qcheck['Key_Word_Location'] = self.index_check(self.dic_Qcheck['Key_Word_Location'])
 
         self.getdata()
 
     def process_result(self):
+
+        columns_result = ['Lot_ID', 'Oven_ID', 'BIB_ID', 'Slot_ID', 'Socket_ID', 'Wafer_ID', 'Wafer_Lot', 'Die_X',
+                          'Die_Y', 'BI_Result(HardBin)']
 
         self.readfile(self.log_path)
 
@@ -166,10 +192,13 @@ class DriveLog:
         result['Oven_ID'] = self.oven
         result['BIB_ID'] = self.bib_number
 
-        result = result[
-            ['Lot_ID', 'Oven_ID', 'BIB_ID', 'Slot_ID', 'Socket_ID', 'Wafer_ID', 'Wafer_Lot', 'Die_X', 'Die_Y',
-             'BI_Result(HardBin)']]
+        # pop unprocessed field to prevent error
+        diff = list(set(columns_result).difference(result.columns))
+        columns_result = [x for x in columns_result if x not in diff]
+        result = result[columns_result]
+
         self.result = result
+
         return result
 
     def blank_check(self, value):
@@ -184,6 +213,14 @@ class DriveLog:
 
         else:
             return False
+
+    # change value from position to index of list : 8->7
+    def index_check(self, value):
+
+        value = int(value)
+        if value > 0:
+            value -= 1
+        return value
 
     def bin2check(self):
 
@@ -246,14 +283,16 @@ class DriveLog:
             if tmp[key_location] == bin_index:
                 bin_row = tmp[socket_location:]
                 bin_row_copy = bin_row[0:socket_density]
-                list_bin = self.str2bin(bin_row_copy)
+                list_bin = self.str2bin(bin_row_copy, slot_id)
                 df = pandas.DataFrame(list_bin)
                 df['Slot_ID'] = slot_id
 
                 bin_list_slot.append(df)
-
-        df_result = pandas.concat(bin_list_slot)
-        return df_result.drop_duplicates()
+        if len(bin_list_slot):
+            df_result = pandas.concat(bin_list_slot)
+            return df_result.drop_duplicates()
+        else:
+            return pandas.DataFrame()
 
     # get ecid and slot per file
     def get_ECID(self, dic={}):
@@ -277,7 +316,7 @@ class DriveLog:
                 ecid_row = tmp[socket_location:]
                 ecid_row_copy = ecid_row[0:socket_density]
 
-                list_ecid = self.str2ecid(ecid_row_copy, dic)
+                list_ecid = self.str2ecid(ecid_row_copy, slot_id, dic)
                 # dic_ecid = {
                 #     'Slot_ID': slot_id,
                 #     'ECID_list': list_ecid,
@@ -335,7 +374,12 @@ class DriveLog:
         return df_wafer
 
     # get ecid(DEC) from one row
-    def str2bin(self, bin_row, dic={}):
+    def str2bin(self, bin_row, slot_id, dic={}):
+
+        if slot_id in self.dic_blank_sockets:
+            blank_sockets = self.dic_blank_sockets[slot_id]
+        else:
+            blank_sockets = {}
 
         if not dic:
             dic = self.dic_Bin2
@@ -350,8 +394,14 @@ class DriveLog:
                 dic_each = {'Socket_ID': socket_id,
                             'BI_Result(HardBin)': '1',
                             }
+
             elif each in empty_socket:
                 continue
+
+            # blank sockets from basic slot info
+            elif str(socket_id) in blank_sockets:
+                continue
+
             else:
                 dic_each = {'Socket_ID': socket_id,
                             'BI_Result(HardBin)': each,
@@ -362,12 +412,16 @@ class DriveLog:
         return list_bin_result
 
     # get ecid(DEC) from one row
-    def str2ecid(self, ecid_row, dic={}):
+    def str2ecid(self, ecid_row, slot_id, dic={}):
 
         if not dic:
             dic = self.dic_Bin2
         split_ecid_method = dic['Split_ECID_method']
         empty_socket = dic['Empty_Socket'].split(',')
+        if slot_id in self.dic_blank_sockets:
+            blank_sockets = self.dic_blank_sockets[slot_id]
+        else:
+            blank_sockets = {}
 
         if 'A' in split_ecid_method:
             wafer_start = 0
@@ -391,7 +445,11 @@ class DriveLog:
         list_ecid = []
         for each in ecid_row:
             socket_id += 1
-            if each not in empty_socket:
+            if each in empty_socket:
+                continue
+            elif str(socket_id) in blank_sockets:
+                continue
+            else:
                 try:
                     wafer_id = int(each[wafer_start:x_start])
                     x_id = (each[x_start:y_start])
@@ -435,7 +493,7 @@ class DriveLog:
 
         # result = self.process_result()
         if not kwargs:
-            kwargs['path_or_buf'] = '{0}.csv'.format(self.lot)
+            kwargs['path_or_buf'] = 'D:\\NewECIDcheck\\folder1\\{0}.csv'.format(self.lot)
 
         self.result.to_csv(**kwargs)
 
@@ -445,6 +503,9 @@ def main():
     log_path = 'D:\\NewECIDcheck\\LogFiles\\TCALYPSO100\\TJMEA2LLP401FSL015BIN2_DriverMonitor.log'
     log_path = 'D:\\NewECIDcheck\\LogFiles\\TCALYPSO100\\TJMEA2LLP401FSL004REB3_DriverMonitor.log'
     log_path = 'D:\\NewECIDcheck\\LogFiles\\KPANTHER257'
+    # log_path = 'E:\\EkkoWang\\ECIDcheck\\Driver Monitor - Copy'
+    # log_path = 'D:\\NewECIDcheck\\folder1'
+
 
     for each in readFolder(log_path):
         # try:
@@ -453,7 +514,8 @@ def main():
         one = DriveLog(each_file)
 
         one.process_result()
-        # one.to_csv('asfas')
+
+        one.to_csv()
         del one
     # except Exception as e:
     #     print(each,e)
