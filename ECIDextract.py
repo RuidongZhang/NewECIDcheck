@@ -3,6 +3,7 @@ import shutil
 import time
 import sys
 import pandas
+import numpy as np
 
 
 def readConfig():
@@ -134,7 +135,8 @@ class DriveLog:
                 tmp = each.replace(', ', ',')
                 key_index = tmp.split(',')
                 self.dic_from_file = {'BIB': key_index.index('BIB'),
-                                      'Slot': key_index.index('Slot'), }
+                                      'Slot': key_index.index('Slot'),
+                                      'Driver': key_index.index('Driver'), }
 
     def readfile(self, file_path):
         fOpen = open(file_path, 'r')
@@ -174,7 +176,7 @@ class DriveLog:
 
     def process_result(self):
 
-        columns_result = ['Lot_ID', 'Oven_ID', 'BIB_ID', 'Slot_ID', 'Socket_ID', 'Wafer_ID', 'Wafer_Lot', 'Die_X',
+        columns_result = ['Lot_ID', 'Oven_ID', 'BIB_ID', 'Driver_ID', 'Slot_ID', 'Socket_ID', 'Wafer_ID', 'Wafer_Lot', 'Die_X',
                           'Die_Y', 'BI_Result(HardBin)']
 
         self.readfile(self.log_path)
@@ -202,7 +204,6 @@ class DriveLog:
 
         result['Lot_ID'] = self.lot
         result['Oven_ID'] = self.oven
-        # result['BIB_ID'] = self.bib_number
 
         # pop unprocessed field to prevent error
         # columns_result = [x for x in columns_result if x not in diff]
@@ -256,7 +257,8 @@ class DriveLog:
 
         df_binsort = self.get_binsort(self.dic_Bin2)
         if len(df_binsort):
-            df_result = pandas.merge(left=df_result, right=df_binsort, on=['Slot_ID', 'Socket_ID','BIB_ID'], how='outer')
+            df_result = pandas.merge(left=df_result, right=df_binsort, on=['Slot_ID', 'Socket_ID', 'BIB_ID'],
+                                     how='outer')
 
         return df_result
 
@@ -284,22 +286,26 @@ class DriveLog:
     def write_info(self, row, df=None):
         # add slot and bib to df column
 
-        slot_id = 5
-        BIB_id = 3
+        slot_index = 5
+        BIB_index = 3
+        driver_index = 4
 
         if self.dic_from_file:
             slot_index = self.dic_from_file['Slot']
             BIB_index = self.dic_from_file['BIB']
+            driver_index = self.dic_from_file['Driver']
 
             slot_id = row[slot_index]
             BIB_id = row[BIB_index]
+            driver_id = row[driver_index]
 
         if df:
             df['Slot_ID'] = slot_id
             df['BIB_ID'] = BIB_id
+            df['Driver_ID'] = driver_id
             return df
         else:
-            return slot_id, BIB_id
+            return slot_id, BIB_id, driver_id
 
         # get bin result
 
@@ -322,11 +328,12 @@ class DriveLog:
                 bin_row_copy = bin_row[0:socket_density]
 
                 # write slot and BIB
-                slot_id, BIB_id = self.write_info(row=tmp)
+                slot_id, BIB_id, driver_id = self.write_info(row=tmp)
                 list_bin = self.str2bin(bin_row_copy, slot_id)
                 df = pandas.DataFrame(list_bin)
                 df['Slot_ID'] = slot_id
                 df['BIB_ID'] = BIB_id
+                df['Driver_ID'] = driver_id
 
                 bin_list_slot.append(df)
         if len(bin_list_slot):
@@ -335,8 +342,8 @@ class DriveLog:
         else:
             return pandas.DataFrame()
 
-    # get ecid and slot per file
-    def get_ECID(self, dic={}):
+    # digital ecid info locates in one row
+    def row2ecid(self, dic={}):
 
         if not dic:
             dic = self.dic_Bin2
@@ -353,20 +360,104 @@ class DriveLog:
                 tmp.remove('')
 
             if tmp[key_location] == ecid_index:
-
                 ecid_row = tmp[socket_location:]
                 ecid_row_copy = ecid_row[0:socket_density]
 
                 # get slot, bib id
-                slot_id, BIB_id = self.write_info(row=tmp)
+                slot_id, BIB_id, driver_id = self.write_info(row=tmp)
                 list_ecid = self.str2ecid(ecid_row_copy, slot_id, dic)
 
                 df = pandas.DataFrame(list_ecid)
                 df['Slot_ID'] = slot_id
                 df['BIB_ID'] = BIB_id
+                df['Driver_ID'] = driver_id
 
                 ecid_list_slot.append(df)
 
+        return ecid_list_slot
+
+    # for some Analog products,the ecid locates in 3position
+    def trirows2ecid(self, dic={}):
+        if not dic:
+            dic = self.dic_Bin2
+        key_location = int(dic['Key_Word_Location'])
+        key_index = dic['ECID_Index'].split('&')
+
+        # {'Slot_ID':'Wafer_ID'}
+        dic_part_1 = {}
+        dic_part_2 = {}
+        dic_part_3 = {}
+
+        dic_slot = {}
+
+        for each_row in self.rows_data:
+            tmp = each_row.split(',')
+            while '' in tmp:
+                tmp.remove('')
+            # get slot, bib id
+            slot_id, BIB_id, driver_id = self.write_info(row=tmp)
+            dic_slot[slot_id] = slot_id, BIB_id, driver_id
+
+            if tmp[key_location] == key_index[0]:
+                dic_part_1[slot_id] = self.get_rowdata(tmp) or 'Blank'
+
+            elif tmp[key_location] == key_index[1]:
+                dic_part_2[slot_id] = self.get_rowdata(tmp) or 'Blank'
+
+            elif tmp[key_location] == key_index[2]:
+                dic_part_3[slot_id] = self.get_rowdata(tmp) or 'Blank'
+
+        ecid_list_slot = []
+        for each_slot in dic_part_1.keys():
+            tuple_rowsdata = zip(dic_part_1[each_slot], dic_part_2[each_slot], dic_part_3[each_slot])
+            ecid_row_copy = list(map(lambda x: x[0] + x[1] + x[2], tuple_rowsdata))
+
+            # get slot, bib id
+            slot_id, BIB_id, driver_id = dic_slot[each_slot]
+            list_ecid = self.str2ecid(ecid_row_copy, each_slot, dic)
+
+            df = pandas.DataFrame(list_ecid)
+            df['Slot_ID'] = slot_id
+            df['BIB_ID'] = BIB_id
+            df['Driver_ID'] = driver_id
+
+            ecid_list_slot.append(df)
+
+        return ecid_list_slot
+
+    # get pure data from 1 row. not filter blank socket
+    def get_rowdata(self, row,filter_blank=False, dic={}):
+
+        if not dic:
+            dic = self.dic_Bin2
+        socket_density = dic['Socket_Density']
+        socket_location = dic['1st_Socket_Location']
+        empty_socket = dic['Empty_Socket'].split(',')
+
+        row_data = row[socket_location:]
+        row_data = row_data[0:int(socket_density)]
+
+        if filter_blank:
+            row_data = [e for e in row_data if e not in empty_socket]
+        if len(row_data):
+            return row_data
+        else:
+            return 0
+
+    # get ecid and slot per file
+    def get_ECID(self, dic={}):
+
+        if not dic:
+            dic = self.dic_Bin2
+
+        # ecid from 1 or 3 rows
+        ecid_index = dic['ECID_Index']
+        if len(ecid_index.split('&')) == 1:
+            ecid_list_slot = self.row2ecid()
+        else:
+            ecid_list_slot = self.trirows2ecid()
+
+        # reformat list -> pandas
         if len(ecid_list_slot) > 1:
             df_result = pandas.concat(ecid_list_slot)
         elif len(ecid_list_slot) == 1:
@@ -393,16 +484,16 @@ class DriveLog:
             while '' in tmp:
                 tmp.remove('')
             # get slot, bib id
-            slot_id, BIB_id = self.write_info(row=tmp)
+            slot_id, BIB_id, driver_id = self.write_info(row=tmp)
 
             if tmp[key_location] == dic['Wafer_lot_Word1']:
-                dic_wafer_1[slot_id] = self.str2waferlot(tmp) or 'Blank'
+                dic_wafer_1[slot_id] = self.get_rowdata(tmp) or 'Blank'
 
             elif tmp[key_location] == dic['Wafer_lot_Word2']:
-                dic_wafer_2[slot_id] = self.str2waferlot(tmp) or 'Blank'
+                dic_wafer_2[slot_id] = self.get_rowdata(tmp) or 'Blank'
 
             elif tmp[key_location] == dic['Wafer_lot_Word3']:
-                dic_wafer_3[slot_id] = self.str2waferlot(tmp) or 'Blank'
+                dic_wafer_3[slot_id] = self.get_rowdata(tmp) or 'Blank'
 
         df_wafer_1 = pandas.DataFrame(dic_wafer_1, index=['1'])
         df_wafer_2 = pandas.DataFrame(dic_wafer_2, index=['2'])
@@ -513,25 +604,6 @@ class DriveLog:
 
         return list_ecid
 
-    # get wafer lot from 3 wafer lot index
-    def str2waferlot(self, rows, dic={}):
-
-        if not dic:
-            dic = self.dic_Bin2
-        socket_density = dic['Socket_Density']
-        empty_socket = dic['Empty_Socket'].split(',')
-        socket_location = dic['1st_Socket_Location']
-
-        # slot_id = rows[5]
-        wafer_row = rows[socket_location:]
-        wafer_row = wafer_row[0:int(socket_density)]
-
-        wafer_row = [e for e in wafer_row if e not in empty_socket]
-        if len(wafer_row):
-            return wafer_row[0]
-        else:
-            return 0
-
     def to_csv(self, **kwargs):
 
         # result = self.process_result()
@@ -544,24 +616,24 @@ class DriveLog:
 def main():
     log_path = 'D:\\NewECIDcheck\\LogFiles\\TCALYPSO100\\TJMEA2LLP401TTJ009SP4_DriverMonitor.log'
     log_path = 'D:\\NewECIDcheck\\LogFiles\\TCALYPSO100\\TJMEA2LLP401FSL015BIN2_DriverMonitor.log'
-    log_path = 'D:\\NewECIDcheck\\LogFiles\\TCALYPSO256'
+    log_path = 'D:\\NewECIDcheck\\LogFiles\\KPANTHER257'
     # log_path = 'D:\\NewECIDcheck\\LogFiles\\TCALYPSO100\\TJMEA2LLP401FSL004REB3_DriverMonitor.log'
     # log_path = 'D:\\NewECIDcheck\\LogFiles\\KPANTHER257'
     # log_path = 'E:\\EkkoWang\\ECIDcheck\\Driver Monitor - Copy'
     # log_path = 'D:\\NewECIDcheck\\folder1'
-    log_path = 'D:\\NewECIDcheck\\New folder\\LJ4LT41HOF00FSL005REB1SP1_DriverMonitor.log'
+    # log_path = 'D:\\NewECIDcheck\\New folder\\LJ4LT41HOF00FSL005REB1SP1_DriverMonitor.log'
 
     # if '.log' in log_path:
 
-    one = DriveLog(log_path)
-
-    one.process_result()
-
-    one.to_csv()
-    del one
+    # one = DriveLog(log_path)
+    #
+    # one.process_result()
+    #
+    # one.to_csv()
+    # del one
 
     for each in readFolder(log_path):
-        try:
+        if 'DriverMonitor' in each:
             each_file = log_path + '\\' + each
 
             one = DriveLog(each_file)
@@ -570,15 +642,16 @@ def main():
 
             one.to_csv()
             del one
-        except:
-            # try:
 
-            one = DriveLog(log_path)
-
-            one.process_result()
-
-            one.to_csv()
-            del one
+        # except:
+        #     # try:
+        #
+        #     one = DriveLog(log_path)
+        #
+        #     one.process_result()
+        #
+        #     # one.to_csv()
+        #     del one
 
     # except Exception as e:
     #     print(each,e)
