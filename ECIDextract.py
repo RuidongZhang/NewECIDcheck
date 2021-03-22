@@ -3,7 +3,9 @@ import shutil
 import time
 import sys
 import pandas
-import numpy as np
+
+
+# import numpy as np
 
 
 def readConfig():
@@ -176,8 +178,8 @@ class DriveLog:
 
     def process_result(self):
 
-        columns_result = ['Lot_ID', 'Oven_ID', 'BIB_ID', 'Driver_ID', 'Slot_ID', 'Socket_ID', 'Wafer_ID', 'Wafer_Lot', 'Die_X',
-                          'Die_Y', 'BI_Result(HardBin)']
+        columns_result = ['Lot_ID', 'Oven_ID', 'BIB_ID', 'Driver_ID', 'Slot_ID', 'Socket_ID', 'Wafer_ID', 'Wafer_Lot',
+                          'Die_X', 'Die_Y', 'BI_Result(HardBin)']
 
         self.readfile(self.log_path)
 
@@ -257,7 +259,8 @@ class DriveLog:
 
         df_binsort = self.get_binsort(self.dic_Bin2)
         if len(df_binsort):
-            df_result = pandas.merge(left=df_result, right=df_binsort, on=['Slot_ID', 'Socket_ID', 'BIB_ID'],
+            df_result = pandas.merge(left=df_result, right=df_binsort,
+                                     on=['Slot_ID', 'Socket_ID', 'BIB_ID', 'Driver_ID'],
                                      how='outer')
 
         return df_result
@@ -426,7 +429,7 @@ class DriveLog:
         return ecid_list_slot
 
     # get pure data from 1 row. not filter blank socket
-    def get_rowdata(self, row,filter_blank=False, dic={}):
+    def get_rowdata(self, row, filter_blank=False, dic={}):
 
         if not dic:
             dic = self.dic_Bin2
@@ -453,9 +456,9 @@ class DriveLog:
         # ecid from 1 or 3 rows
         ecid_index = dic['ECID_Index']
         if len(ecid_index.split('&')) == 1:
-            ecid_list_slot = self.row2ecid()
+            ecid_list_slot = self.row2ecid(dic)
         else:
-            ecid_list_slot = self.trirows2ecid()
+            ecid_list_slot = self.trirows2ecid(dic)
 
         # reformat list -> pandas
         if len(ecid_list_slot) > 1:
@@ -487,13 +490,13 @@ class DriveLog:
             slot_id, BIB_id, driver_id = self.write_info(row=tmp)
 
             if tmp[key_location] == dic['Wafer_lot_Word1']:
-                dic_wafer_1[slot_id] = self.get_rowdata(tmp) or 'Blank'
+                dic_wafer_1[slot_id] = self.get_rowdata(tmp, filter_blank=True)[0] or 'Blank'
 
             elif tmp[key_location] == dic['Wafer_lot_Word2']:
-                dic_wafer_2[slot_id] = self.get_rowdata(tmp) or 'Blank'
+                dic_wafer_2[slot_id] = self.get_rowdata(tmp, filter_blank=True)[0] or 'Blank'
 
             elif tmp[key_location] == dic['Wafer_lot_Word3']:
-                dic_wafer_3[slot_id] = self.get_rowdata(tmp) or 'Blank'
+                dic_wafer_3[slot_id] = self.get_rowdata(tmp, filter_blank=True)[0] or 'Blank'
 
         df_wafer_1 = pandas.DataFrame(dic_wafer_1, index=['1'])
         df_wafer_2 = pandas.DataFrame(dic_wafer_2, index=['2'])
@@ -604,19 +607,22 @@ class DriveLog:
 
         return list_ecid
 
-    def to_csv(self, **kwargs):
+    def to_csv(self, ouput_folder=None):
 
         # result = self.process_result()
-        if not kwargs:
-            kwargs['path_or_buf'] = 'D:\\NewECIDcheck\\folder1\\{0}.csv'.format(self.lot)
+        if not ouput_folder:
+            ouput_file = 'D:\\NewECIDcheck\\folder1\\{0}.csv'.format(self.lot)
+        else:
+            ouput_file = ouput_folder + '\\{0}.csv'.format(self.lot)
 
-        self.result.to_csv(**kwargs)
+        self.result.to_csv(ouput_file)
 
 
 def main():
-    log_path = 'D:\\NewECIDcheck\\LogFiles\\TCALYPSO100\\TJMEA2LLP401TTJ009SP4_DriverMonitor.log'
-    log_path = 'D:\\NewECIDcheck\\LogFiles\\TCALYPSO100\\TJMEA2LLP401FSL015BIN2_DriverMonitor.log'
-    log_path = 'D:\\NewECIDcheck\\LogFiles\\KPANTHER257'
+    log_path, ouput_folder = folderConfig()
+    # log_path = 'D:\\NewECIDcheck\\LogFiles\\TCALYPSO100\\TJMEA2LLP401TTJ009SP4_DriverMonitor.log'
+    # log_path = 'D:\\NewECIDcheck\\LogFiles\\TCALYPSO100\\TJMEA2LLP401FSL015BIN2_DriverMonitor.log'
+    # log_path = 'D:\\NewECIDcheck\\LogFiles\\\\Test1'
     # log_path = 'D:\\NewECIDcheck\\LogFiles\\TCALYPSO100\\TJMEA2LLP401FSL004REB3_DriverMonitor.log'
     # log_path = 'D:\\NewECIDcheck\\LogFiles\\KPANTHER257'
     # log_path = 'E:\\EkkoWang\\ECIDcheck\\Driver Monitor - Copy'
@@ -634,14 +640,18 @@ def main():
 
     for each in readFolder(log_path):
         if 'DriverMonitor' in each:
-            each_file = log_path + '\\' + each
 
-            one = DriveLog(each_file)
+            try:
+                each_file = log_path + '\\' + each
 
-            one.process_result()
+                one = DriveLog(each_file)
 
-            one.to_csv()
-            del one
+                one.process_result()
+
+                one.to_csv(ouput_folder)
+                del one
+            except:
+                pass
 
         # except:
         #     # try:
@@ -660,6 +670,23 @@ def main():
 def readFolder(path):
     list = os.listdir(path.replace('\n', ''))
     return list
+
+
+def folderConfig():
+    path = os.path.dirname(os.path.realpath(sys.argv[0]))
+    fopen = open(path + '\\config.txt', 'r')
+    lines = fopen.readlines()
+
+    for row in lines:
+        row = row.rstrip('\n')
+        if row.startswith('BI_log_input_folder'):
+            input_folder = row.split('|')[1]
+        if row.startswith('BI_csv_output_folder'):
+            output_folder = row.split('|')[1]
+
+    fopen.close()
+
+    return input_folder, output_folder
 
 
 if __name__ == '__main__':
