@@ -178,8 +178,8 @@ class DriveLog:
 
     def process_result(self):
 
-        columns_result = ['Lot_ID', 'Oven_ID', 'BIB_ID', 'Driver_ID', 'Slot_ID', 'Socket_ID', 'Wafer_ID', 'Wafer_Lot',
-                          'Die_X', 'Die_Y', 'BI_Result(HardBin)']
+        columns_result = ['Lot_ID', 'Oven_ID', 'BIB_ID', 'Driver_ID', 'Slot_ID', 'Socket_ID', 'Wafer_Lot', 'ECID_BI',
+                          'Wafer_ID', 'Die_X', 'Die_Y', 'BI_Result(HardBin)']
 
         self.readfile(self.log_path)
 
@@ -596,7 +596,8 @@ class DriveLog:
                         x_id = int(x_id, base=16)
                         y_id = int(y_id, base=16)
 
-                    dic = {'Socket_ID': socket_id,
+                    dic = {'ECID_BI': each,
+                           'Socket_ID': socket_id,
                            'Wafer_ID': wafer_id,
                            'Die_X': x_id,
                            'Die_Y': y_id
@@ -637,7 +638,7 @@ def main():
     #
     # one.to_csv()
     # del one
-
+    log = []
     for each in readFolder(log_path):
         if 'DriverMonitor' in each:
 
@@ -648,23 +649,15 @@ def main():
 
                 one.process_result()
 
-                one.to_csv(ouput_folder)
+                # one.to_csv(ouput_folder)
+
+                log.append(each + '--success!')
+
                 del one
-            except:
-                pass
 
-        # except:
-        #     # try:
-        #
-        #     one = DriveLog(log_path)
-        #
-        #     one.process_result()
-        #
-        #     # one.to_csv()
-        #     del one
-
-    # except Exception as e:
-    #     print(each,e)
+            except Exception as e:
+                er = each + '--error: ' + str(e)
+                log.append(er)
 
 
 def readFolder(path):
