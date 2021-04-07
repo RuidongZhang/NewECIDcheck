@@ -25,7 +25,7 @@ class DriveLog:
         self.columns = ['BIB_No', 'BIB_Type', 'Socket_Density', 'Pass_Code_Bin1',
                         'Bin_Sort_Index', 'Empty_Socket', 'ECID_Index', 'Split_ECID_method',
                         'Wafer_lot_Word1', 'Wafer_lot_Word2', 'Wafer_lot_Word3',
-                        'Include_Bin2_check', 'Check_Type', 'Special_Words']
+                        'Include_Check', 'Check_Type', 'Special_Words']
         self.dic_Bin2 = {}
         self.dic_Qcheck = {}
         self.dic_from_file = {}
@@ -100,6 +100,24 @@ class DriveLog:
                 self.oven = list_1st_row[1]
                 return self.oven
 
+    def identifySpecialWords(self):
+
+        rows = self.rows
+        for each in rows:
+            if 'Primary Diag:' in each:
+                list_1st_row = each.split('Primary Diag:')[1]
+                self.special_words = list_1st_row.split('.')[0]
+                return self.special_words
+
+    def getSpecialWords(self, df):
+
+        col = filter(self.blank_check, df['Special_Words'])
+        words = set(col)
+        if words:
+            return list(words)[0]
+        else:
+            return False
+
     # get all rows startswith lot number
     def getdata(self):
 
@@ -160,7 +178,17 @@ class DriveLog:
         self.read_index()
 
         df_Bin2 = self.df_bib[self.df_bib['Check_Type'] == 'Bin2']
+        if self.getSpecialWords(df_Bin2):
+            spwords = self.identifySpecialWords()
+            df_Bin2 = df_Bin2[df_Bin2['Special_Words'].apply(lambda row: row in spwords)]
+
         df_Qcheck = self.df_bib[self.df_bib['Check_Type'] == 'Qcheck']
+        if self.getSpecialWords(df_Qcheck):
+            spwords = self.identifySpecialWords()
+            df_Qcheck = df_Qcheck[df_Qcheck['Special_Words'].apply(lambda row: row in spwords)]
+
+
+
 
         if len(df_Bin2):
             self.dic_Bin2 = df_Bin2.to_dict('records')[0]
@@ -187,16 +215,16 @@ class DriveLog:
         result_Bin2check = pandas.DataFrame()
         result_Qcheck = pandas.DataFrame()
 
-        if self.dic_Bin2 and self.dic_Bin2['Include_Bin2_check'] == 'Y':
+        if self.dic_Bin2 and self.dic_Bin2['Include_Check'] == 'Y':
             result_Bin2check = self.bin2check()
             result_Bin2check = pandas.concat([result_Bin2check, pandas.DataFrame(columns=['BI_Result(HardBin)'])])
-        if self.dic_Qcheck:
+        if self.dic_Qcheck and self.dic_Qcheck['Include_Check'] == 'Y':
             result_Qcheck = self.Qcheck()
             result_Qcheck['BI_Result(HardBin)'] = 'Qcheck'
 
         if len(result_Bin2check) and len(result_Qcheck):
             result = pandas.concat([result_Bin2check, result_Qcheck])
-            result.drop_duplicates(subset=['Slot_ID', 'Socket_ID', 'Wafer_ID', 'Wafer_Lot', 'Die_X', 'Die_Y'],
+            result.drop_duplicates(subset=['Slot_ID', 'Socket_ID', 'Wafer_ID', 'ECID_BI', 'Die_X', 'Die_Y'],
                                    keep='first', inplace=True)
 
         elif len(result_Bin2check):
@@ -220,7 +248,7 @@ class DriveLog:
 
         return result
 
-    def blank_check(self, value):
+    def blank_check(self, value, value_mode=False):
 
         # if nan
         if value != value:
@@ -228,7 +256,11 @@ class DriveLog:
 
         # if not None,''
         elif value:
-            return True
+
+            if value_mode:
+                return value
+            else:
+                return True
 
         else:
             return False
@@ -246,7 +278,7 @@ class DriveLog:
         df_ecid = self.get_ECID(self.dic_Bin2)
 
         # if not nan, None, ''
-        if self.blank_check(self.dic_Bin2['Wafer_lot_Word1']):
+        if self.blank_check(value=self.dic_Bin2['Wafer_lot_Word1']):
             df_wafer = self.get_wafer(self.dic_Bin2)
 
         else:
@@ -272,7 +304,7 @@ class DriveLog:
             return pandas.DataFrame()
 
         # if not nan, None, ''
-        if self.blank_check(self.dic_Bin2['Wafer_lot_Word1']):
+        if self.blank_check(value=self.dic_Bin2['Wafer_lot_Word1']):
             df_wafer = self.get_wafer(self.dic_Bin2)
 
         else:
@@ -385,6 +417,7 @@ class DriveLog:
             dic = self.dic_Bin2
         key_location = int(dic['Key_Word_Location'])
         key_index = dic['ECID_Index'].split('&')
+        empty_socket = dic['Empty_Socket'].split(',')
 
         # {'Slot_ID':'Wafer_ID'}
         dic_part_1 = {}
@@ -400,6 +433,9 @@ class DriveLog:
             # get slot, bib id
             slot_id, BIB_id, driver_id = self.write_info(row=tmp)
             dic_slot[slot_id] = slot_id, BIB_id, driver_id
+
+            # if tmp[key_location] in empty_socket:
+            #     pass
 
             if tmp[key_location] == key_index[0]:
                 dic_part_1[slot_id] = self.get_rowdata(tmp) or 'Blank'
@@ -445,7 +481,7 @@ class DriveLog:
         if len(row_data):
             return row_data
         else:
-            return 0
+            return [0]
 
     # get ecid and slot per file
     def get_ECID(self, dic={}):
@@ -560,6 +596,7 @@ class DriveLog:
         else:
             blank_sockets = {}
 
+        # sample: 142205 / 42205,14/4: Wafer ID(Dec)
         if 'A' in split_ecid_method:
             wafer_start = 0
             x_start = -4
@@ -587,7 +624,11 @@ class DriveLog:
             elif str(socket_id) in blank_sockets:
                 continue
             else:
+                # some code can not be read
                 try:
+                    # if 1:
+                    if each[wafer_start:x_start] == 'FF':
+                        a1 = 1
                     wafer_id = int(each[wafer_start:x_start])
                     x_id = (each[x_start:y_start])
                     y_id = (each[y_start:])
@@ -596,13 +637,13 @@ class DriveLog:
                         x_id = int(x_id, base=16)
                         y_id = int(y_id, base=16)
 
-                    dic = {'ECID_BI': each,
-                           'Socket_ID': socket_id,
-                           'Wafer_ID': wafer_id,
-                           'Die_X': x_id,
-                           'Die_Y': y_id
-                           }
-                    list_ecid.append(dic)
+                    dic_one = {'ECID_BI': each,
+                               'Socket_ID': socket_id,
+                               'Wafer_ID': wafer_id,
+                               'Die_X': x_id,
+                               'Die_Y': y_id
+                               }
+                    list_ecid.append(dic_one)
                 except Exception as e:
                     print(self.lot, e)
 
@@ -616,7 +657,7 @@ class DriveLog:
         else:
             ouput_file = ouput_folder + '\\{0}.csv'.format(self.lot)
 
-        self.result.to_csv(ouput_file)
+        self.result.to_csv(ouput_file, index=False)
 
 
 def main():
@@ -642,22 +683,22 @@ def main():
     for each in readFolder(log_path):
         if 'DriverMonitor' in each:
 
-            try:
+            if 1:
                 each_file = log_path + '\\' + each
 
                 one = DriveLog(each_file)
 
                 one.process_result()
 
-                # one.to_csv(ouput_folder)
+                one.to_csv(ouput_folder)
 
                 log.append(each + '--success!')
 
                 del one
-
-            except Exception as e:
-                er = each + '--error: ' + str(e)
-                log.append(er)
+            #
+            # except Exception as e:
+            #     er = each + '--error: ' + str(e)
+            #     log.append(er)
 
 
 def readFolder(path):
