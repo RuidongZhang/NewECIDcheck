@@ -18,7 +18,7 @@ def readConfig():
 class DriveLog:
     df_config = readConfig()
 
-    def __init__(self, log_path):
+    def __init__(self, log_path, bin2_path=''):
 
         self.path = os.path.dirname(os.path.realpath(sys.argv[0]))
         self.log_path = log_path
@@ -30,6 +30,7 @@ class DriveLog:
         self.dic_Qcheck = {}
         self.dic_from_file = {}
         self.df_config = DriveLog.df_config
+        self.bin2_path = bin2_path
 
     def readFolder(self, path):
         list = os.listdir(path)
@@ -119,6 +120,39 @@ class DriveLog:
             return False
 
     # get all rows startswith lot number
+    def getbin2df(self):
+        fOpen = open(self.bin2_path, 'r')
+        ori_rows = fOpen.readlines()
+        fOpen.close()
+
+        rows = [each.replace('\n', '') for each in ori_rows]
+        rows = [each.replace(' ', '').replace('=', '') for each in rows if '###' in each]
+        dic = {}
+
+        for each in rows:
+            tmp = each.split('###')
+            bib = tmp[1]
+            res = tmp[2].split(',')
+            lis = []
+            for i in res:
+                if i.isalpha():
+                    bin2_result = i
+                elif i.isdigit():
+                    lis.append({'Bin2_Result': bin2_result,
+                                'Socket_ID': int(i)})
+            df = pandas.DataFrame(lis)
+            dic[bib] = df
+
+        result = pandas.DataFrame()
+        for key in dic.keys():
+            df = dic[key]
+            df['BIB_ID'] = key
+            result = pandas.concat([result, df])
+
+        result.drop_duplicates(subset=['BIB_ID','Socket_ID'], keep='last', inplace=True)
+        return result
+
+    # get all rows startswith lot number
     def getdata(self):
 
         self.rows_data = [each for each in self.rows if each.startswith(self.lot)]
@@ -187,9 +221,6 @@ class DriveLog:
             spwords = self.identifySpecialWords()
             df_Qcheck = df_Qcheck[df_Qcheck['Special_Words'].apply(lambda row: row in spwords)]
 
-
-
-
         if len(df_Bin2):
             self.dic_Bin2 = df_Bin2.to_dict('records')[0]
 
@@ -207,7 +238,7 @@ class DriveLog:
     def process_result(self):
 
         columns_result = ['Lot_ID', 'Oven_ID', 'BIB_ID', 'Driver_ID', 'Slot_ID', 'Socket_ID', 'Wafer_Lot', 'ECID_BI',
-                          'Wafer_ID', 'Die_X', 'Die_Y', 'BI_Result(HardBin)']
+                          'Wafer_ID', 'Die_X', 'Die_Y', 'BI_Result(HardBin)', 'Bin2_Result']
 
         self.readfile(self.log_path)
 
@@ -232,13 +263,18 @@ class DriveLog:
         elif len(result_Qcheck):
             result = result_Qcheck
 
-        result['Lot_ID'] = self.lot
         result['Oven_ID'] = self.oven
+
+        # check bin2 log
+        if self.bin2_path:
+            bin2df = self.getbin2df()
+            result = pandas.merge(left=result, right=bin2df, on=['BIB_ID', 'Socket_ID'], how='outer')
 
         # pop unprocessed field to prevent error
         # columns_result = [x for x in columns_result if x not in diff]
         diff = list(set(columns_result).difference(result.columns))
 
+        result['Lot_ID'] = self.lot
         for col in diff:
             result[col] = None
 
@@ -679,26 +715,45 @@ def main():
     #
     # one.to_csv()
     # del one
+    folder = readFolder(log_path)
     log = []
-    for each in readFolder(log_path):
+    for each in folder:
+
         if 'DriverMonitor' in each:
 
+            now = time.strftime("%Y-%m-%d %H-%M-%S", time.localtime(time.time()))
+            # try:
             if 1:
                 each_file = log_path + '\\' + each
+                # bin2_list = list(filter(lambda x: ((each.split('_')[0] + '.Log') in x) and (len(x.split('_'))==3), folder))
+                bin2_list = list(filter(lambda x: (each.split('_')[0] in x) and x.startswith('B2_'), folder))
+                if bin2_list:
+                    ld_log = log_path + '\\' + bin2_list[0]
+                else:
+                    ld_log = ''
+                # ld_log = ''
 
-                one = DriveLog(each_file)
+                one = DriveLog(each_file, ld_log)
 
                 one.process_result()
 
                 one.to_csv(ouput_folder)
 
-                log.append(each + '--success!')
+                log.append({'File': each,
+                            'Result': 'Success',
+                            'Time': now})
 
                 del one
             #
             # except Exception as e:
-            #     er = each + '--error: ' + str(e)
-            #     log.append(er)
+            #     er = 'Error: ' + str(e)
+            #     log.append({'File':each,
+            #             'Result':er,
+            #             'Time':now})
+            # # add mode to csv
+            # pandas.DataFrame(log).to_csv('ProcessLog.csv', mode='a', header=False)
+
+    # getAddedfiles(log_path, ouput_folder)
 
 
 def readFolder(path):
@@ -723,5 +778,25 @@ def folderConfig():
     return input_folder, output_folder
 
 
+def getAddedfiles(path_to_watch, ouput_folder):
+    import os, time
+
+    before = dict([(f, None) for f in os.listdir(path_to_watch)])
+    while 1:
+        time.sleep(10)
+        after = dict([(f, None) for f in os.listdir(path_to_watch)])
+        added = [f for f in after if not f in before]
+        removed = [f for f in before if not f in after]
+        if added:
+            print("Added: ", ", ".join(added))
+        if removed:
+            print("Removed: ", ", ".join(removed))
+        before = after
+
+
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    except Exception as e:
+        print(e)
+        time.sleep(10)
