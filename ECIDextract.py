@@ -267,14 +267,24 @@ class DriveLog:
 
         # check bin2 log
         if self.bin2_path:
-            bin2df = self.getbin2df()
-            result = pandas.merge(left=result, right=bin2df, on=['BIB_ID', 'Socket_ID'], how='outer')
+            try:
+                bin2df = self.getbin2df()
+                result = pandas.merge(left=result, right=bin2df, on=['BIB_ID', 'Socket_ID'], how='outer')
+                self.bin2_er = 'Success'
 
+            except Exception as e:
+                er = 'Error: ' + str(e)
+                self.bin2_er = er
+                print(self.lot, 'Bin2 log erro: ', er)
+        else:
+            self.bin2_er = 'No related Bin2 log.'
+
+
+        result['Lot_ID'] = self.lot
         # pop unprocessed field to prevent error
         # columns_result = [x for x in columns_result if x not in diff]
         diff = list(set(columns_result).difference(result.columns))
 
-        result['Lot_ID'] = self.lot
         for col in diff:
             result[col] = None
 
@@ -282,7 +292,7 @@ class DriveLog:
 
         self.result = result
 
-        return result
+        return result, self.bin2_er
 
     def blank_check(self, value, value_mode=False):
 
@@ -697,12 +707,12 @@ class DriveLog:
 
 
 def main():
-    log_path, ouput_folder = folderConfig()
+    log_path, ouput_folder, error_folder = folderConfig()
     # log_path = 'D:\\NewECIDcheck\\LogFiles\\TCALYPSO100\\TJMEA2LLP401TTJ009SP4_DriverMonitor.log'
     # log_path = 'D:\\NewECIDcheck\\LogFiles\\TCALYPSO100\\TJMEA2LLP401FSL015BIN2_DriverMonitor.log'
     # log_path = 'D:\\NewECIDcheck\\LogFiles\\\\Test1'
     # log_path = 'D:\\NewECIDcheck\\LogFiles\\TCALYPSO100\\TJMEA2LLP401FSL004REB3_DriverMonitor.log'
-    # log_path = 'D:\\NewECIDcheck\\LogFiles\\KPANTHER257'
+    log_path = 'D:\\NewECIDcheck\\LogFiles\\TPACE6'
     # log_path = 'E:\\EkkoWang\\ECIDcheck\\Driver Monitor - Copy'
     # log_path = 'D:\\NewECIDcheck\\folder1'
     # log_path = 'D:\\NewECIDcheck\\New folder\\LJ4LT41HOF00FSL005REB1SP1_DriverMonitor.log'
@@ -740,19 +750,28 @@ def main():
                 one.to_csv(ouput_folder)
 
                 log.append({'File': each,
-                            'Result': 'Success',
+                            'DM Result': 'Success',
+                            'Bin2 Result': one.bin2_er,
                             'Time': now})
 
                 del one
+                # dellogfile(each_file)
+                # if ld_log:
+                #     dellogfile(ld_log)
+
             #
             # except Exception as e:
             #     er = 'Error: ' + str(e)
+            #     movelogfile(each_file, error_folder)
             #     log.append({'File':each,
             #             'Result':er,
+            #             'Bin2 Result': one.bin2_er,
             #             'Time':now})
-            # # add mode to csv
-            # pandas.DataFrame(log).to_csv('ProcessLog.csv', mode='a', header=False)
+            #     if 'one' in locals().keys():
+            #         del one
 
+            # # add mode to csv
+    pandas.DataFrame(log).to_csv(error_folder + '\\' + 'ProcessLog-%s.csv'% now, mode='a', index=False)
     # getAddedfiles(log_path, ouput_folder)
 
 
@@ -772,10 +791,12 @@ def folderConfig():
             input_folder = row.split('|')[1]
         if row.startswith('BI_csv_output_folder'):
             output_folder = row.split('|')[1]
+        if row.startswith('BI_log_error_folder'):
+            error_folder = row.split('|')[1]
 
     fopen.close()
 
-    return input_folder, output_folder
+    return input_folder, output_folder,error_folder
 
 
 def getAddedfiles(path_to_watch, ouput_folder):
@@ -792,6 +813,18 @@ def getAddedfiles(path_to_watch, ouput_folder):
         if removed:
             print("Removed: ", ", ".join(removed))
         before = after
+
+def movelogfile(src_path, dst_path):
+    try:
+        shutil.move(src_path, dst_path)
+    except Exception as e:
+        print(e, 'Error:Move log file')
+
+def dellogfile(src_path):
+    try:
+        os.remove(src_path)
+    except Exception as e:
+        print(e, 'Error:Delete log file')
 
 
 if __name__ == '__main__':

@@ -5,3 +5,4 @@ BI_log_input_folder|D:\NewECIDcheck\LogFiles\TCALYPSO100
 
 BI_csv_output_folder|D:\NewECIDcheck\folder1
 
+BI_log_error_folder|D:\NewECIDcheck\folder1
