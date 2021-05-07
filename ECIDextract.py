@@ -31,6 +31,7 @@ class DriveLog:
         self.dic_from_file = {}
         self.df_config = DriveLog.df_config
         self.bin2_path = bin2_path
+        self.bin2_er = 'Not Processed yet.'
 
     def readFolder(self, path):
         list = os.listdir(path)
@@ -126,8 +127,13 @@ class DriveLog:
         fOpen.close()
 
         rows = [each.replace('\n', '') for each in ori_rows]
-        rows = [each.replace(' ', '').replace('=', '') for each in rows if '###' in each]
+        rows = [each.replace(' ', '').replace('=', '').replace('?','') for each in rows if '###' in each]
         dic = {}
+
+        if self.blank_check(self.dic_Bin2['Socket_Density']):
+            socket_density = (self.dic_Bin2['Socket_Density'])
+        elif self.blank_check(self.dic_Qcheck['Socket_Density']):
+            socket_density = self.dic_Qcheck['Socket_Density']
 
         for each in rows:
             tmp = each.split('###')
@@ -135,12 +141,15 @@ class DriveLog:
             res = tmp[2].split(',')
             lis = []
             for i in res:
-                if i.isalpha():
+                if i.isalnum() and not i.isdigit():
                     bin2_result = i
                 elif i.isdigit():
                     lis.append({'Bin2_Result': bin2_result,
                                 'Socket_ID': int(i)})
-            df = pandas.DataFrame(lis)
+            bad_socket = [i['Socket_ID'] for i in lis]
+            lis_good = [{'Bin2_Result': 'pass', 'Socket_ID': i} for i in range(1, int(socket_density) + 1) if i not in bad_socket]
+
+            df = pandas.DataFrame(lis + lis_good)
             dic[bib] = df
 
         result = pandas.DataFrame()
@@ -149,7 +158,11 @@ class DriveLog:
             df['BIB_ID'] = key
             result = pandas.concat([result, df])
 
+        # once good, always good
+        df_pass = result[result['Bin2_Result'] == 'pass']
+        result = pandas.concat([result, df_pass])
         result.drop_duplicates(subset=['BIB_ID','Socket_ID'], keep='last', inplace=True)
+
         return result
 
     # get all rows startswith lot number
@@ -254,8 +267,12 @@ class DriveLog:
             result_Qcheck['BI_Result(HardBin)'] = 'Qcheck'
 
         if len(result_Bin2check) and len(result_Qcheck):
+            # sometimes,bin2 has no wafer lot info,
+            if 'Wafer_Lot' not in result_Bin2check.columns:
+                result_Bin2check = pandas.merge(left=result_Bin2check,right=result_Qcheck[['BIB_ID','ECID_BI','Wafer_Lot']],on=['BIB_ID','ECID_BI'],how='left')
+
             result = pandas.concat([result_Bin2check, result_Qcheck])
-            result.drop_duplicates(subset=['Slot_ID', 'Socket_ID', 'Wafer_ID', 'ECID_BI', 'Die_X', 'Die_Y'],
+            result.drop_duplicates(subset=['BIB_ID', 'Slot_ID', 'Socket_ID', 'Wafer_ID', 'ECID_BI', 'Die_X', 'Die_Y'],
                                    keep='first', inplace=True)
 
         elif len(result_Bin2check):
@@ -331,7 +348,7 @@ class DriveLog:
             df_wafer = pandas.DataFrame()
 
         if len(df_wafer):
-            df_result = pandas.merge(left=df_ecid, right=df_wafer, on='Slot_ID', how='outer')
+            df_result = pandas.merge(left=df_ecid, right=df_wafer, on=['Slot_ID','Socket_ID'], how='left')
         else:
             df_result = df_ecid
 
@@ -350,14 +367,14 @@ class DriveLog:
             return pandas.DataFrame()
 
         # if not nan, None, ''
-        if self.blank_check(value=self.dic_Bin2['Wafer_lot_Word1']):
-            df_wafer = self.get_wafer(self.dic_Bin2)
+        if self.blank_check(value=self.dic_Qcheck['Wafer_lot_Word1']):
+            df_wafer = self.get_wafer(self.dic_Qcheck)
 
         else:
             df_wafer = pandas.DataFrame()
 
         if len(df_wafer):
-            df_result = pandas.merge(left=df_ecid, right=df_wafer, on='Slot_ID', how='outer')
+            df_result = pandas.merge(left=df_ecid, right=df_wafer, on=['Slot_ID','Socket_ID'], how='left')
         else:
             df_result = df_ecid
 
@@ -419,7 +436,12 @@ class DriveLog:
                 bin_list_slot.append(df)
         if len(bin_list_slot):
             df_result = pandas.concat(bin_list_slot)
-            return df_result.drop_duplicates()
+
+            # bin check may repeat multiple times and once good, see it as a good unit
+            df_bin1 = df_result[df_result['BI_Result(HardBin)'] == 'pass']
+            df_result = pandas.concat([df_bin1, df_result])
+
+            return df_result.drop_duplicates(subset=['Slot_ID', 'Socket_ID', 'BIB_ID', 'Driver_ID'], keep='first')
         else:
             return pandas.DataFrame()
 
@@ -553,7 +575,7 @@ class DriveLog:
         return df_result.drop_duplicates()
 
     # get wafer and slot per file
-    def get_wafer(self, dic={}):
+    def get_wafer1(self, dic={}):
 
         if not dic:
             dic = self.dic_Bin2
@@ -589,6 +611,84 @@ class DriveLog:
         df_wafer['Wafer_Lot'] = df_wafer['1'] + df_wafer['2'] + df_wafer['3']
         df_wafer.drop(columns=['1', '2', '3'], inplace=True)
         return df_wafer
+    def get_wafer(self, dic={}):
+        if not dic:
+            dic = self.dic_Bin2
+        key_location = int(dic['Key_Word_Location'])
+        key_index = [dic['Wafer_lot_Word1'],dic['Wafer_lot_Word2'],dic['Wafer_lot_Word3'] ]
+        empty_socket = dic['Empty_Socket'].split(',')
+
+        # {'Slot_ID':'Wafer_ID'}
+        dic_part_1 = {}
+        dic_part_2 = {}
+        dic_part_3 = {}
+
+        dic_slot = {}
+
+        for each_row in self.rows_data:
+            tmp = each_row.split(',')
+            while '' in tmp:
+                tmp.remove('')
+            # get slot, bib id
+            slot_id, BIB_id, driver_id = self.write_info(row=tmp)
+            dic_slot[slot_id] = slot_id, BIB_id, driver_id
+
+            # if tmp[key_location] in empty_socket:
+            #     pass
+
+            if tmp[key_location] == key_index[0]:
+                dic_part_1[slot_id] = self.get_rowdata(tmp,dic=dic) or 'Blank'
+
+            elif tmp[key_location] == key_index[1]:
+                dic_part_2[slot_id] = self.get_rowdata(tmp,dic=dic) or 'Blank'
+
+            elif tmp[key_location] == key_index[2]:
+                dic_part_3[slot_id] = self.get_rowdata(tmp,dic=dic) or 'Blank'
+
+        d1 = pandas.DataFrame(dic_part_1)
+        if self.blank_check(key_index[1]):
+            d2 = pandas.DataFrame(dic_part_2)
+        else:
+            d2 = pandas.DataFrame()
+        if self.blank_check(key_index[2]):
+            d3 = pandas.DataFrame(dic_part_2)
+        else:
+            d3 = pandas.DataFrame()
+
+        d0 = pandas.concat([d1, d2, d3])
+        # d0['Socket_ID']=d0.index + 1
+        d0 = d0.fillna('Blank')
+        b = pandas.DataFrame()
+        for each in set(d0.index):
+            tmp = d0[d0.index == each].reset_index(drop=True)
+            a = tmp.apply(lambda x: ''.join(i for i in list(x)), axis=0)
+            a = pandas.DataFrame(a, columns=['Wafer_Lot'])
+            a['Slot_ID'] = a.index
+            a['Socket_ID'] = each + 1
+            b = pandas.concat([b, a])
+
+        return b
+
+        ecid_list_slot = []
+        common_slots = set(dic_part_1) & set(dic_part_2) & set(dic_part_3)
+        for each_slot in common_slots:
+            if each_slot == '60':
+                aaaa=1
+            tuple_rowsdata = zip(dic_part_1[each_slot], dic_part_2[each_slot], dic_part_3[each_slot])
+            ecid_row_copy = list(map(lambda x: x[0] + x[1] + x[2], tuple_rowsdata))
+
+            # get slot, bib id
+            slot_id, BIB_id, driver_id = dic_slot[each_slot]
+
+            df = pandas.DataFrame(ecid_row_copy,columns=['Wafer_Lot'])
+            df['Socket_ID'] = df.index + 1
+            df['Slot_ID'] = slot_id
+            # df['BIB_ID'] = BIB_id
+            # df['Driver_ID'] = driver_id
+
+            ecid_list_slot.append(df)
+
+        return pandas.concat(ecid_list_slot)
 
     # get ecid(DEC) from one row
     def str2bin(self, bin_row, slot_id, dic={}):
@@ -611,7 +711,7 @@ class DriveLog:
             socket_id += 1
             if each == bin1_code:
                 dic_each = {'Socket_ID': socket_id,
-                            'BI_Result(HardBin)': '1',
+                            'BI_Result(HardBin)': 'pass',
                             }
 
             elif each in empty_socket:
@@ -673,8 +773,8 @@ class DriveLog:
                 # some code can not be read
                 try:
                     # if 1:
-                    if each[wafer_start:x_start] == 'FF':
-                        a1 = 1
+                    # if each[wafer_start:x_start] == 'FF':
+                    #     a1 = 1
                     wafer_id = int(each[wafer_start:x_start])
                     x_id = (each[x_start:y_start])
                     y_id = (each[y_start:])
@@ -712,7 +812,7 @@ def main():
     # log_path = 'D:\\NewECIDcheck\\LogFiles\\TCALYPSO100\\TJMEA2LLP401FSL015BIN2_DriverMonitor.log'
     # log_path = 'D:\\NewECIDcheck\\LogFiles\\\\Test1'
     # log_path = 'D:\\NewECIDcheck\\LogFiles\\TCALYPSO100\\TJMEA2LLP401FSL004REB3_DriverMonitor.log'
-    log_path = 'D:\\NewECIDcheck\\LogFiles\\TPACE6'
+    # log_path = 'D:\\NewECIDcheck\\LogFiles\\TPACE6'
     # log_path = 'E:\\EkkoWang\\ECIDcheck\\Driver Monitor - Copy'
     # log_path = 'D:\\NewECIDcheck\\folder1'
     # log_path = 'D:\\NewECIDcheck\\New folder\\LJ4LT41HOF00FSL005REB1SP1_DriverMonitor.log'
@@ -754,7 +854,6 @@ def main():
                             'Bin2 Result': one.bin2_er,
                             'Time': now})
 
-                del one
                 # dellogfile(each_file)
                 # if ld_log:
                 #     dellogfile(ld_log)
@@ -769,8 +868,10 @@ def main():
             #             'Time':now})
             #     if 'one' in locals().keys():
             #         del one
+            del one
 
             # # add mode to csv
+    now = time.strftime("%Y-%m-%d %H-%M-%S", time.localtime(time.time()))
     pandas.DataFrame(log).to_csv(error_folder + '\\' + 'ProcessLog-%s.csv'% now, mode='a', index=False)
     # getAddedfiles(log_path, ouput_folder)
 
@@ -830,6 +931,9 @@ def dellogfile(src_path):
 if __name__ == '__main__':
     try:
         main()
+        print('Finished.')
+        time.sleep(10)
+
     except Exception as e:
         print(e)
         time.sleep(10)

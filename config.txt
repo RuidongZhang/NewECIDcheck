@@ -1,7 +1,7 @@
 
 # DON'T open any file during process!
 
-BI_log_input_folder|D:\NewECIDcheck\LogFiles\TCALYPSO100
+BI_log_input_folder|D:\NewECIDcheck\LogFiles\\KBOLERO_64LD_256_1
 
 BI_csv_output_folder|D:\NewECIDcheck\folder1
 
