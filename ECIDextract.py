@@ -127,7 +127,7 @@ class DriveLog:
         fOpen.close()
 
         rows = [each.replace('\n', '') for each in ori_rows]
-        rows = [each.replace(' ', '').replace('=', '').replace('?','') for each in rows if '###' in each]
+        rows = [each.replace(' ', '').replace('=', '').replace('?', '') for each in rows if '###' in each]
         dic = {}
 
         if self.blank_check(self.dic_Bin2['Socket_Density']):
@@ -147,7 +147,8 @@ class DriveLog:
                     lis.append({'Bin2_Result': bin2_result,
                                 'Socket_ID': int(i)})
             bad_socket = [i['Socket_ID'] for i in lis]
-            lis_good = [{'Bin2_Result': 'pass', 'Socket_ID': i} for i in range(1, int(socket_density) + 1) if i not in bad_socket]
+            lis_good = [{'Bin2_Result': 'pass', 'Socket_ID': i} for i in range(1, int(socket_density) + 1) if
+                        i not in bad_socket]
 
             df = pandas.DataFrame(lis + lis_good)
             dic[bib] = df
@@ -161,7 +162,7 @@ class DriveLog:
         # once good, always good
         df_pass = result[result['Bin2_Result'] == 'pass']
         result = pandas.concat([result, df_pass])
-        result.drop_duplicates(subset=['BIB_ID','Socket_ID'], keep='last', inplace=True)
+        result.drop_duplicates(subset=['BIB_ID', 'Socket_ID'], keep='last', inplace=True)
 
         return result
 
@@ -269,7 +270,9 @@ class DriveLog:
         if len(result_Bin2check) and len(result_Qcheck):
             # sometimes,bin2 has no wafer lot info,
             if 'Wafer_Lot' not in result_Bin2check.columns:
-                result_Bin2check = pandas.merge(left=result_Bin2check,right=result_Qcheck[['BIB_ID','ECID_BI','Wafer_Lot']],on=['BIB_ID','ECID_BI'],how='left')
+                result_Bin2check = pandas.merge(left=result_Bin2check,
+                                                right=result_Qcheck[['BIB_ID', 'ECID_BI', 'Wafer_Lot']],
+                                                on=['BIB_ID', 'ECID_BI'], how='left')
 
             result = pandas.concat([result_Bin2check, result_Qcheck])
             result.drop_duplicates(subset=['BIB_ID', 'Slot_ID', 'Socket_ID', 'Wafer_ID', 'ECID_BI', 'Die_X', 'Die_Y'],
@@ -295,7 +298,6 @@ class DriveLog:
                 print(self.lot, 'Bin2 log erro: ', er)
         else:
             self.bin2_er = 'No related Bin2 log.'
-
 
         result['Lot_ID'] = self.lot
         # pop unprocessed field to prevent error
@@ -348,7 +350,7 @@ class DriveLog:
             df_wafer = pandas.DataFrame()
 
         if len(df_wafer):
-            df_result = pandas.merge(left=df_ecid, right=df_wafer, on=['Slot_ID','Socket_ID'], how='left')
+            df_result = pandas.merge(left=df_ecid, right=df_wafer, on=['Slot_ID', 'Socket_ID'], how='left')
         else:
             df_result = df_ecid
 
@@ -374,7 +376,7 @@ class DriveLog:
             df_wafer = pandas.DataFrame()
 
         if len(df_wafer):
-            df_result = pandas.merge(left=df_ecid, right=df_wafer, on=['Slot_ID','Socket_ID'], how='left')
+            df_result = pandas.merge(left=df_ecid, right=df_wafer, on=['Slot_ID', 'Socket_ID'], how='left')
         else:
             df_result = df_ecid
 
@@ -611,11 +613,12 @@ class DriveLog:
         df_wafer['Wafer_Lot'] = df_wafer['1'] + df_wafer['2'] + df_wafer['3']
         df_wafer.drop(columns=['1', '2', '3'], inplace=True)
         return df_wafer
+
     def get_wafer(self, dic={}):
         if not dic:
             dic = self.dic_Bin2
         key_location = int(dic['Key_Word_Location'])
-        key_index = [dic['Wafer_lot_Word1'],dic['Wafer_lot_Word2'],dic['Wafer_lot_Word3'] ]
+        key_index = [dic['Wafer_lot_Word1'], dic['Wafer_lot_Word2'], dic['Wafer_lot_Word3']]
         empty_socket = dic['Empty_Socket'].split(',')
 
         # {'Slot_ID':'Wafer_ID'}
@@ -637,13 +640,13 @@ class DriveLog:
             #     pass
 
             if tmp[key_location] == key_index[0]:
-                dic_part_1[slot_id] = self.get_rowdata(tmp,dic=dic) or 'Blank'
+                dic_part_1[slot_id] = self.get_rowdata(tmp, dic=dic) or 'Blank'
 
             elif tmp[key_location] == key_index[1]:
-                dic_part_2[slot_id] = self.get_rowdata(tmp,dic=dic) or 'Blank'
+                dic_part_2[slot_id] = self.get_rowdata(tmp, dic=dic) or 'Blank'
 
             elif tmp[key_location] == key_index[2]:
-                dic_part_3[slot_id] = self.get_rowdata(tmp,dic=dic) or 'Blank'
+                dic_part_3[slot_id] = self.get_rowdata(tmp, dic=dic) or 'Blank'
 
         d1 = pandas.DataFrame(dic_part_1)
         if self.blank_check(key_index[1]):
@@ -673,14 +676,14 @@ class DriveLog:
         common_slots = set(dic_part_1) & set(dic_part_2) & set(dic_part_3)
         for each_slot in common_slots:
             if each_slot == '60':
-                aaaa=1
+                aaaa = 1
             tuple_rowsdata = zip(dic_part_1[each_slot], dic_part_2[each_slot], dic_part_3[each_slot])
             ecid_row_copy = list(map(lambda x: x[0] + x[1] + x[2], tuple_rowsdata))
 
             # get slot, bib id
             slot_id, BIB_id, driver_id = dic_slot[each_slot]
 
-            df = pandas.DataFrame(ecid_row_copy,columns=['Wafer_Lot'])
+            df = pandas.DataFrame(ecid_row_copy, columns=['Wafer_Lot'])
             df['Socket_ID'] = df.index + 1
             df['Slot_ID'] = slot_id
             # df['BIB_ID'] = BIB_id
@@ -872,7 +875,7 @@ def main():
 
             # # add mode to csv
     now = time.strftime("%Y-%m-%d %H-%M-%S", time.localtime(time.time()))
-    pandas.DataFrame(log).to_csv(error_folder + '\\' + 'ProcessLog-%s.csv'% now, mode='a', index=False)
+    pandas.DataFrame(log).to_csv(error_folder + '\\' + 'ProcessLog-%s.csv' % now, mode='a', index=False)
     # getAddedfiles(log_path, ouput_folder)
 
 
@@ -897,7 +900,7 @@ def folderConfig():
 
     fopen.close()
 
-    return input_folder, output_folder,error_folder
+    return input_folder, output_folder, error_folder
 
 
 def getAddedfiles(path_to_watch, ouput_folder):
@@ -915,11 +918,13 @@ def getAddedfiles(path_to_watch, ouput_folder):
             print("Removed: ", ", ".join(removed))
         before = after
 
+
 def movelogfile(src_path, dst_path):
     try:
         shutil.move(src_path, dst_path)
     except Exception as e:
         print(e, 'Error:Move log file')
+
 
 def dellogfile(src_path):
     try:
