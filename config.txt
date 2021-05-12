@@ -1,8 +1,18 @@
 
 # DON'T open any file during process!
 
-BI_log_input_folder|D:\NewECIDcheck\LogFiles\\KBOLERO_64LD_256_1
+# Drive monitor log and bin2 log path
+BI_log_input_folder|D:\NewECIDcheck\LogFiles\Test1
 
+# Output of processed log.
 BI_csv_output_folder|D:\NewECIDcheck\folder1
 
+# failed log and Bin2 log would be moved to this folder. Processsed/Error record would be written here too.
 BI_log_error_folder|D:\NewECIDcheck\folder1
+
+
+# other defaut config, if you don't understand the config, just leave it as origin.
+# 1. filter blank in ECID: True(origin) or Flase
+filter_blank_in_ECID|True
+# 2. delete processed log files(error log/unprocessed log not included): True(origin) or Flase
+del_processed_log|False

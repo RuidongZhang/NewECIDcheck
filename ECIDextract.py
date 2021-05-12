@@ -32,6 +32,10 @@ class DriveLog:
         self.df_config = DriveLog.df_config
         self.bin2_path = bin2_path
         self.bin2_er = 'Not Processed yet.'
+        self.rows_Bin2 = pandas.DataFrame()
+        self.rows_Qcheck = pandas.DataFrame()
+        self.data_flag = ''
+        self.filter_blank_in_ECID = True
 
     def readFolder(self, path):
         list = os.listdir(path)
@@ -113,6 +117,9 @@ class DriveLog:
 
     def getSpecialWords(self, df):
 
+        if not len(df):
+            return False
+
         col = filter(self.blank_check, df['Special_Words'])
         words = set(col)
         if words:
@@ -120,7 +127,7 @@ class DriveLog:
         else:
             return False
 
-    # get all rows startswith lot number
+    # get all rows startswith lot number from bin2 log file
     def getbin2df(self):
         fOpen = open(self.bin2_path, 'r')
         ori_rows = fOpen.readlines()
@@ -166,11 +173,34 @@ class DriveLog:
 
         return result
 
+    def get_rows_bin2(self):
+        bin2_start = ['Started']
+        bin2_complete = ['Complete']
+        # res = len(set(A).intersection(set(B)))
+        rows = [each for each in self.rows if (each.startswith(self.lot)) or len([x for x in bin2_start if x in each])]
+
+        rows_bin2 = []
+        rows_qcheck = []
+        bin2_flag = False
+
+        for each in rows:
+            if len([x for x in (bin2_start + bin2_complete) if x in each]):
+                bin2_flag = not bin2_flag
+            elif bin2_flag:
+                rows_bin2.append(each)
+            else:
+                rows_qcheck.append(each)
+
+        self.rows_Bin2 = rows_bin2
+        self.rows_Qcheck = rows_qcheck
+
+        return rows_bin2, rows_qcheck
+
     # get all rows startswith lot number
     def getdata(self):
 
         self.rows_data = [each for each in self.rows if each.startswith(self.lot)]
-        tmp1 = pandas.DataFrame(self.rows_data)
+        # tmp1 = pandas.DataFrame(self.rows   _data)
         # rows_data = tmp1[0].str.split(',', expand=True)
 
         key_list = ['Bin_Sort_Index', 'ECID_Index', 'Wafer_lot_Word1', 'Wafer_lot_Word2', 'Wafer_lot_Word3']
@@ -255,14 +285,22 @@ class DriveLog:
                           'Wafer_ID', 'Die_X', 'Die_Y', 'BI_Result(HardBin)', 'Bin2_Result']
 
         self.readfile(self.log_path)
+        self.get_rows_bin2()
 
         result = pandas.DataFrame()
         result_Bin2check = pandas.DataFrame()
         result_Qcheck = pandas.DataFrame()
 
+        if len(self.rows_Bin2):
+            self.data_flag = 'Bin2'
+
         if self.dic_Bin2 and self.dic_Bin2['Include_Check'] == 'Y':
             result_Bin2check = self.bin2check()
             result_Bin2check = pandas.concat([result_Bin2check, pandas.DataFrame(columns=['BI_Result(HardBin)'])])
+
+        if len(self.rows_Qcheck):
+            self.data_flag = 'Qcheck'
+
         if self.dic_Qcheck and self.dic_Qcheck['Include_Check'] == 'Y':
             result_Qcheck = self.Qcheck()
             result_Qcheck['BI_Result(HardBin)'] = 'Qcheck'
@@ -273,6 +311,11 @@ class DriveLog:
                 result_Bin2check = pandas.merge(left=result_Bin2check,
                                                 right=result_Qcheck[['BIB_ID', 'ECID_BI', 'Wafer_Lot']],
                                                 on=['BIB_ID', 'ECID_BI'], how='left')
+            else:
+                temp = pandas.merge(left=result_Bin2check[['BIB_ID', 'ECID_BI', 'Wafer_Lot']],
+                                    right=result_Qcheck[['BIB_ID', 'ECID_BI', 'Wafer_Lot']],
+                                    on=['BIB_ID', 'ECID_BI'], how='left', suffixes=['', '_Q'])
+                result_Bin2check['Wafer_Lot'] = temp.fillna(axis=1, method='bfill')['Wafer_Lot']
 
             result = pandas.concat([result_Bin2check, result_Qcheck])
             result.drop_duplicates(subset=['BIB_ID', 'Slot_ID', 'Socket_ID', 'Wafer_ID', 'ECID_BI', 'Die_X', 'Die_Y'],
@@ -308,6 +351,9 @@ class DriveLog:
             result[col] = None
 
         result = result[columns_result]
+
+        if self.filter_blank_in_ECID in [True, 'True']:
+            result.dropna(axis=0, subset=['ECID_BI'], inplace=True)
 
         self.result = result
 
@@ -418,7 +464,15 @@ class DriveLog:
         socket_density = int(dic['Socket_Density'])
 
         bin_list_slot = []
-        for each_row in self.rows_data:
+
+        if self.data_flag == 'Bin2':
+            use_rows = self.rows_Bin2
+        elif self.data_flag == 'Qcheck':
+            use_rows = self.rows_Qcheck
+        else:
+            use_rows = self.rows_data
+
+        for each_row in use_rows:
             tmp = each_row.split(',')
             while '' in tmp:
                 tmp.remove('')
@@ -459,7 +513,14 @@ class DriveLog:
 
         ecid_list_slot = []
 
-        for each_row in self.rows_data:
+        if self.data_flag == 'Bin2':
+            use_rows = self.rows_Bin2
+        elif self.data_flag == 'Qcheck':
+            use_rows = self.rows_Qcheck
+        else:
+            use_rows = self.rows_data
+
+        for each_row in use_rows:
             tmp = each_row.split(',')
             while '' in tmp:
                 tmp.remove('')
@@ -496,7 +557,14 @@ class DriveLog:
 
         dic_slot = {}
 
-        for each_row in self.rows_data:
+        if self.data_flag == 'Bin2':
+            use_rows = self.rows_Bin2
+        elif self.data_flag == 'Qcheck':
+            use_rows = self.rows_Qcheck
+        else:
+            use_rows = self.rows_data
+
+        for each_row in use_rows:
             tmp = each_row.split(',')
             while '' in tmp:
                 tmp.remove('')
@@ -577,42 +645,6 @@ class DriveLog:
         return df_result.drop_duplicates()
 
     # get wafer and slot per file
-    def get_wafer1(self, dic={}):
-
-        if not dic:
-            dic = self.dic_Bin2
-        key_location = int(dic['Key_Word_Location'])
-
-        # {'Slot_ID':'Wafer_ID'}
-        dic_wafer_1 = {}
-        dic_wafer_2 = {}
-        dic_wafer_3 = {}
-
-        for each_row in self.rows_data:
-            tmp = each_row.split(',')
-            while '' in tmp:
-                tmp.remove('')
-            # get slot, bib id
-            slot_id, BIB_id, driver_id = self.write_info(row=tmp)
-
-            if tmp[key_location] == dic['Wafer_lot_Word1']:
-                dic_wafer_1[slot_id] = self.get_rowdata(tmp, filter_blank=True)[0] or 'Blank'
-
-            elif tmp[key_location] == dic['Wafer_lot_Word2']:
-                dic_wafer_2[slot_id] = self.get_rowdata(tmp, filter_blank=True)[0] or 'Blank'
-
-            elif tmp[key_location] == dic['Wafer_lot_Word3']:
-                dic_wafer_3[slot_id] = self.get_rowdata(tmp, filter_blank=True)[0] or 'Blank'
-
-        df_wafer_1 = pandas.DataFrame(dic_wafer_1, index=['1'])
-        df_wafer_2 = pandas.DataFrame(dic_wafer_2, index=['2'])
-        df_wafer_3 = pandas.DataFrame(dic_wafer_2, index=['3'])
-        df_wafer = pandas.concat([df_wafer_1, df_wafer_2, df_wafer_3])
-        df_wafer = df_wafer.T.reset_index()
-        df_wafer = df_wafer.rename(columns={'index': 'Slot_ID'})
-        df_wafer['Wafer_Lot'] = df_wafer['1'] + df_wafer['2'] + df_wafer['3']
-        df_wafer.drop(columns=['1', '2', '3'], inplace=True)
-        return df_wafer
 
     def get_wafer(self, dic={}):
         if not dic:
@@ -628,7 +660,14 @@ class DriveLog:
 
         dic_slot = {}
 
-        for each_row in self.rows_data:
+        if self.data_flag == 'Bin2':
+            use_rows = self.rows_Bin2
+        elif self.data_flag == 'Qcheck':
+            use_rows = self.rows_Qcheck
+        else:
+            use_rows = self.rows_data
+
+        for each_row in use_rows:
             tmp = each_row.split(',')
             while '' in tmp:
                 tmp.remove('')
@@ -654,7 +693,7 @@ class DriveLog:
         else:
             d2 = pandas.DataFrame()
         if self.blank_check(key_index[2]):
-            d3 = pandas.DataFrame(dic_part_2)
+            d3 = pandas.DataFrame(dic_part_3)
         else:
             d3 = pandas.DataFrame()
 
@@ -810,7 +849,12 @@ class DriveLog:
 
 
 def main():
-    log_path, ouput_folder, error_folder = folderConfig()
+    config_tuple = folderConfig()
+    log_path = config_tuple[0]
+    ouput_folder = config_tuple[1]
+    error_folder = config_tuple[2]
+    filter_blank_in_ECID = config_tuple[3]
+    del_processed_log = config_tuple[4]
     # log_path = 'D:\\NewECIDcheck\\LogFiles\\TCALYPSO100\\TJMEA2LLP401TTJ009SP4_DriverMonitor.log'
     # log_path = 'D:\\NewECIDcheck\\LogFiles\\TCALYPSO100\\TJMEA2LLP401FSL015BIN2_DriverMonitor.log'
     # log_path = 'D:\\NewECIDcheck\\LogFiles\\\\Test1'
@@ -835,8 +879,8 @@ def main():
         if 'DriverMonitor' in each:
 
             now = time.strftime("%Y-%m-%d %H-%M-%S", time.localtime(time.time()))
-            # try:
-            if 1:
+            try:
+                # if 1:
                 each_file = log_path + '\\' + each
                 # bin2_list = list(filter(lambda x: ((each.split('_')[0] + '.Log') in x) and (len(x.split('_'))==3), folder))
                 bin2_list = list(filter(lambda x: (each.split('_')[0] in x) and x.startswith('B2_'), folder))
@@ -847,6 +891,7 @@ def main():
                 # ld_log = ''
 
                 one = DriveLog(each_file, ld_log)
+                one.filter_blank_in_ECID = filter_blank_in_ECID
 
                 one.process_result()
 
@@ -857,21 +902,22 @@ def main():
                             'Bin2 Result': one.bin2_er,
                             'Time': now})
 
-                # dellogfile(each_file)
-                # if ld_log:
-                #     dellogfile(ld_log)
+                if del_processed_log in ['True',True]:
+                    dellogfile(each_file)
+                    if ld_log:
+                        dellogfile(ld_log)
 
             #
-            # except Exception as e:
-            #     er = 'Error: ' + str(e)
-            #     movelogfile(each_file, error_folder)
-            #     log.append({'File':each,
-            #             'Result':er,
-            #             'Bin2 Result': one.bin2_er,
-            #             'Time':now})
-            #     if 'one' in locals().keys():
-            #         del one
-            del one
+            except Exception as e:
+                er = 'Error: ' + str(e)
+                movelogfile(each_file, error_folder)
+                movelogfile(ld_log, error_folder)
+                log.append({'File': each,
+                            'Result': er,
+                            'Bin2 Result': one.bin2_er,
+                            'Time': now})
+            if 'one' in locals().keys():
+                del one
 
             # # add mode to csv
     now = time.strftime("%Y-%m-%d %H-%M-%S", time.localtime(time.time()))
@@ -888,6 +934,8 @@ def folderConfig():
     path = os.path.dirname(os.path.realpath(sys.argv[0]))
     fopen = open(path + '\\config.txt', 'r')
     lines = fopen.readlines()
+    filter_blank_in_ECID = 'True'
+    del_processed_log = 'True'
 
     for row in lines:
         row = row.rstrip('\n')
@@ -897,10 +945,14 @@ def folderConfig():
             output_folder = row.split('|')[1]
         if row.startswith('BI_log_error_folder'):
             error_folder = row.split('|')[1]
+        if row.startswith('filter_blank_in_ECID'):
+            filter_blank_in_ECID = row.split('|')[1]
+        if row.startswith('del_processed_log'):
+            del_processed_log = row.split('|')[1]
 
     fopen.close()
 
-    return input_folder, output_folder, error_folder
+    return (input_folder, output_folder, error_folder, filter_blank_in_ECID, del_processed_log)
 
 
 def getAddedfiles(path_to_watch, ouput_folder):
