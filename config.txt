@@ -16,3 +16,5 @@ BI_log_error_folder|D:\NewECIDcheck\folder1
 filter_blank_in_ECID|True
 # 2. delete processed log files(error log/unprocessed log not included): True(origin) or Flase
 del_processed_log|False
+# 3. delete error log files(error log/unprocessed log included): True(origin) or Flase
+del_error_log|False

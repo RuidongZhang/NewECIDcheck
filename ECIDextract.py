@@ -11,8 +11,12 @@ import pandas
 def readConfig():
     df_config = pandas.read_csv('ProductBook.csv', dtype=str)
     df_config.dropna(subset=['BIB_No'], inplace=True)
-    df_config = df_config.replace(' ', '')
+    df_config = df_config.replace([' ', '\t\t'], None)
     return df_config
+
+
+class Err(Exception):
+    pass
 
 
 class DriveLog:
@@ -137,10 +141,13 @@ class DriveLog:
         rows = [each.replace(' ', '').replace('=', '').replace('?', '') for each in rows if '###' in each]
         dic = {}
 
-        if self.blank_check(self.dic_Bin2['Socket_Density']):
-            socket_density = (self.dic_Bin2['Socket_Density'])
-        elif self.blank_check(self.dic_Qcheck['Socket_Density']):
-            socket_density = self.dic_Qcheck['Socket_Density']
+        if 'Socket_Density' in self.dic_Bin2.keys():
+            if self.blank_check(self.dic_Bin2['Socket_Density']):
+                socket_density = (self.dic_Bin2['Socket_Density'])
+
+        elif 'Socket_Density' in self.dic_Qcheck.keys():
+            if self.blank_check(self.dic_Qcheck['Socket_Density']):
+                socket_density = self.dic_Qcheck['Socket_Density']
 
         for each in rows:
             tmp = each.split('###')
@@ -202,21 +209,21 @@ class DriveLog:
         self.rows_data = [each for each in self.rows if each.startswith(self.lot)]
         # tmp1 = pandas.DataFrame(self.rows   _data)
         # rows_data = tmp1[0].str.split(',', expand=True)
-
-        key_list = ['Bin_Sort_Index', 'ECID_Index', 'Wafer_lot_Word1', 'Wafer_lot_Word2', 'Wafer_lot_Word3']
-        index_list = []
-        for each in key_list:
-            if self.dic_Bin2[each]:
-                index_list.append(self.dic_Bin2[each])
-
-        tmp = [i.split(',') for i in self.rows_data]
-        for i in tmp:
-            i.remove('')
-        rows_data = pandas.DataFrame(tmp)
-
-        key_location = rows_data.columns[int(self.dic_Bin2['Key_Word_Location'])]
-        rows_data = rows_data[rows_data[key_location].isin(index_list)]
-        self.df_rows = pandas.DataFrame(rows_data)
+        #
+        # key_list = ['Bin_Sort_Index', 'ECID_Index', 'Wafer_lot_Word1', 'Wafer_lot_Word2', 'Wafer_lot_Word3']
+        # index_list = []
+        # for each in key_list:
+        #     if self.dic_Bin2[each]:
+        #         index_list.append(self.dic_Bin2[each])
+        #
+        # tmp = [i.split(',') for i in self.rows_data]
+        # for i in tmp:
+        #     i.remove('')
+        # rows_data = pandas.DataFrame(tmp)
+        #
+        # key_location = rows_data.columns[int(self.dic_Bin2['Key_Word_Location'])]
+        # rows_data = rows_data[rows_data[key_location].isin(index_list)]
+        # self.df_rows = pandas.DataFrame(rows_data)
 
         return self.rows_data
 
@@ -248,6 +255,8 @@ class DriveLog:
 
         self.bib_number, bib_index = self.identifyBib()
         self.df_bib = self.df_config[self.df_config['BIB_No'].apply(lambda row: row in self.bib_number)]
+        if not len(self.df_bib):
+            raise Err('No related BIB board')
 
         self.identifyOven()
         self.identifyblanksocket()
@@ -265,13 +274,13 @@ class DriveLog:
             spwords = self.identifySpecialWords()
             df_Qcheck = df_Qcheck[df_Qcheck['Special_Words'].apply(lambda row: row in spwords)]
 
-        if len(df_Bin2):
+        if len(df_Bin2) and (df_Bin2['Include_Check'].iloc[0] == 'Y'):
             self.dic_Bin2 = df_Bin2.to_dict('records')[0]
 
             self.dic_Bin2['1st_Socket_Location'] = self.index_check(self.dic_Bin2['1st_Socket_Location'])
             self.dic_Bin2['Key_Word_Location'] = self.index_check(self.dic_Bin2['Key_Word_Location'])
 
-        if len(df_Qcheck):
+        if len(df_Qcheck) and (df_Qcheck['Include_Check'].iloc[0] == 'Y'):
             self.dic_Qcheck = df_Qcheck.to_dict('records')[0]
 
             self.dic_Qcheck['1st_Socket_Location'] = self.index_check(self.dic_Qcheck['1st_Socket_Location'])
@@ -325,6 +334,8 @@ class DriveLog:
             result = result_Bin2check
         elif len(result_Qcheck):
             result = result_Qcheck
+        else:
+            raise Err('DM bin2 and Qcheck all fail')
 
         result['Oven_ID'] = self.oven
 
@@ -855,6 +866,7 @@ def main():
     error_folder = config_tuple[2]
     filter_blank_in_ECID = config_tuple[3]
     del_processed_log = config_tuple[4]
+    del_error_log = config_tuple[5]
     # log_path = 'D:\\NewECIDcheck\\LogFiles\\TCALYPSO100\\TJMEA2LLP401TTJ009SP4_DriverMonitor.log'
     # log_path = 'D:\\NewECIDcheck\\LogFiles\\TCALYPSO100\\TJMEA2LLP401FSL015BIN2_DriverMonitor.log'
     # log_path = 'D:\\NewECIDcheck\\LogFiles\\\\Test1'
@@ -874,6 +886,8 @@ def main():
     # del one
     folder = readFolder(log_path)
     log = []
+    each_file = ''
+    ld_log = ''
     for each in folder:
 
         if 'DriverMonitor' in each:
@@ -902,7 +916,7 @@ def main():
                             'Bin2 Result': one.bin2_er,
                             'Time': now})
 
-                if del_processed_log in ['True',True]:
+                if del_processed_log in ['True', True]:
                     dellogfile(each_file)
                     if ld_log:
                         dellogfile(ld_log)
@@ -910,15 +924,21 @@ def main():
             #
             except Exception as e:
                 er = 'Error: ' + str(e)
-                movelogfile(each_file, error_folder)
-                movelogfile(ld_log, error_folder)
+                if del_error_log in ['True', True]:
+                    dellogfile(each_file)
+                    dellogfile(ld_log)
+                else:
+                    movelogfile(each_file, error_folder)
+                    movelogfile(ld_log, error_folder)
                 log.append({'File': each,
                             'Result': er,
                             'Bin2 Result': one.bin2_er,
                             'Time': now})
             if 'one' in locals().keys():
                 del one
-
+        elif each.startswith('LotReport'):
+            each_file = log_path + '\\' + each
+            dellogfile(each_file)
             # # add mode to csv
     now = time.strftime("%Y-%m-%d %H-%M-%S", time.localtime(time.time()))
     pandas.DataFrame(log).to_csv(error_folder + '\\' + 'ProcessLog-%s.csv' % now, mode='a', index=False)
@@ -949,10 +969,12 @@ def folderConfig():
             filter_blank_in_ECID = row.split('|')[1]
         if row.startswith('del_processed_log'):
             del_processed_log = row.split('|')[1]
+        if row.startswith('del_error_log'):
+            del_error_log = row.split('|')[1]
 
     fopen.close()
 
-    return (input_folder, output_folder, error_folder, filter_blank_in_ECID, del_processed_log)
+    return (input_folder, output_folder, error_folder, filter_blank_in_ECID, del_processed_log, del_error_log)
 
 
 def getAddedfiles(path_to_watch, ouput_folder):
