@@ -2,7 +2,7 @@
 # DON'T open any file during process!
 
 # Drive monitor log and bin2 log path
-BI_log_input_folder|D:\NewECIDcheck\LogFiles\Test1
+BI_log_input_folder|D:\NewECIDcheck\LogFiles\TCALYPSO100
 
 # Output of processed log.
 BI_csv_output_folder|D:\NewECIDcheck\folder1
@@ -14,7 +14,9 @@ BI_log_error_folder|D:\NewECIDcheck\folder1
 # other defaut config, if you don't understand the config, just leave it as origin.
 # 1. filter blank in ECID: True(origin) or Flase
 filter_blank_in_ECID|True
-# 2. delete processed log files(error log/unprocessed log not included): True(origin) or Flase
+# 2. delete processed log files(error log/unprocessed log not included): True(origin) or Flase, would not delete drivemonitor wihout related Bin2 log when #4 not True
 del_processed_log|False
 # 3. delete error log files(error log/unprocessed log included): True(origin) or Flase
 del_error_log|False
+# 4. When #2 is True, delete drive monitor log files if no related bin2 log(error log/unprocessed log included): True or Flase(origin)
+del_drive_noBin2_log|False

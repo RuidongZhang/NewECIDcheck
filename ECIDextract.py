@@ -867,6 +867,7 @@ def main():
     filter_blank_in_ECID = config_tuple[3]
     del_processed_log = config_tuple[4]
     del_error_log = config_tuple[5]
+    del_drive_noBin2_log = config_tuple[6]
     # log_path = 'D:\\NewECIDcheck\\LogFiles\\TCALYPSO100\\TJMEA2LLP401TTJ009SP4_DriverMonitor.log'
     # log_path = 'D:\\NewECIDcheck\\LogFiles\\TCALYPSO100\\TJMEA2LLP401FSL015BIN2_DriverMonitor.log'
     # log_path = 'D:\\NewECIDcheck\\LogFiles\\\\Test1'
@@ -917,11 +918,14 @@ def main():
                             'Time': now})
 
                 if del_processed_log in ['True', True]:
-                    dellogfile(each_file)
-                    if ld_log:
+                    if ld_log and (ld_log not in ['', ' ']):
                         dellogfile(ld_log)
+                    else:
+                        if del_drive_noBin2_log in ['True', True]:
+                            dellogfile(each_file)
+                        else:
+                            pass
 
-            #
             except Exception as e:
                 er = 'Error: ' + str(e)
                 if del_error_log in ['True', True]:
@@ -971,10 +975,13 @@ def folderConfig():
             del_processed_log = row.split('|')[1]
         if row.startswith('del_error_log'):
             del_error_log = row.split('|')[1]
+        if row.startswith('del_drive_noBin2_log'):
+            del_drive_noBin2_log = row.split('|')[1]
 
     fopen.close()
 
-    return (input_folder, output_folder, error_folder, filter_blank_in_ECID, del_processed_log, del_error_log)
+    return (input_folder, output_folder, error_folder, filter_blank_in_ECID, del_processed_log, del_error_log,
+            del_drive_noBin2_log)
 
 
 def getAddedfiles(path_to_watch, ouput_folder):
