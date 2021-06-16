@@ -267,12 +267,16 @@ class DriveLog:
         df_Bin2 = self.df_bib[self.df_bib['Check_Type'] == 'Bin2']
         if self.getSpecialWords(df_Bin2):
             spwords = self.identifySpecialWords()
-            df_Bin2 = df_Bin2[df_Bin2['Special_Words'].apply(lambda row: row in spwords)]
+            df_Bin2 = df_Bin2[df_Bin2['Special_Words'].fillna('JustForProcess').apply(lambda row: row in spwords)]
+            if not len(df_Bin2):
+                df_Bin2 = self.df_bib[self.df_bib['Check_Type'] == 'Bin2']
 
         df_Qcheck = self.df_bib[self.df_bib['Check_Type'] == 'Qcheck']
         if self.getSpecialWords(df_Qcheck):
             spwords = self.identifySpecialWords()
-            df_Qcheck = df_Qcheck[df_Qcheck['Special_Words'].apply(lambda row: row in spwords)]
+            df_Qcheck = df_Qcheck[df_Qcheck['Special_Words'].fillna('JustForProcess').apply(lambda row: row in spwords)]
+            if not len(df_Qcheck):
+                df_Qcheck = self.df_bib[self.df_bib['Check_Type'] == 'Qcheck']
 
         if len(df_Bin2) and (df_Bin2['Include_Check'].iloc[0] == 'Y'):
             self.dic_Bin2 = df_Bin2.to_dict('records')[0]
@@ -370,6 +374,7 @@ class DriveLog:
 
         return result, self.bin2_er
 
+    # if not blank return true
     def blank_check(self, value, value_mode=False):
 
         # if nan
@@ -784,8 +789,8 @@ class DriveLog:
         return list_bin_result
 
     # get ecid(DEC) from one row
-    def str2ecid(self, ecid_row, slot_id, dic={}):
-
+    def str2ecid(self, ecid_row_ori, slot_id, dic={}):
+        ecid_row = ecid_row_ori.copy()
         if not dic:
             dic = self.dic_Bin2
         split_ecid_method = dic['Split_ECID_method']
@@ -800,8 +805,12 @@ class DriveLog:
             wafer_start = 0
             x_start = -4
             y_start = -2
-
-
+        # sample: 2819FF0F
+        elif 'C' in split_ecid_method:
+            ecid_row = [each[4:6]+each[2:4]+each[0:2]+each[6:] for each in ecid_row]
+            wafer_start = 2
+            x_start = 4
+            y_start = 6
 
         elif split_ecid_method.isdigit():
 
@@ -836,7 +845,7 @@ class DriveLog:
                         x_id = int(x_id, base=16)
                         y_id = int(y_id, base=16)
 
-                    dic_one = {'ECID_BI': each,
+                    dic_one = {'ECID_BI': ecid_row_ori[socket_id-1],
                                'Socket_ID': socket_id,
                                'Wafer_ID': wafer_id,
                                'Die_X': x_id,
